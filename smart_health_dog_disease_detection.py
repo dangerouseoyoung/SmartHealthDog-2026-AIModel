@@ -57,7 +57,7 @@ DOG_MODELS_NAMES = {
 # 고양이: 단일 모델 3종 (B4, FocalLoss)
 CAT_SINGLE_MODELS_NAMES = {
     "./cat_models/cat_conjunctivitis.pkl":  "Conjunctivitis",
-    "./cat_models/cat_corneal_scapula.pkl": "Corneal_Scapula",
+    "./cat_models/cat_corneal_dystrophy.pkl": "Corneal Dystrophy",
     "./cat_models/cat_corneal_ulcer.pkl":   "Corneal Ulcer",
 }
 
