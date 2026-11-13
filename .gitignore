@@ -17,4 +17,7 @@ mlruns/
 
 benchmark_results/
 benchmark_data/
+respiration/data/
+respiration/outputs
+respiration/weights/
 mlflow.db

@@ -1,6 +1,0 @@
-albumentations
-mlflow
-dvc
-jupyter
-notebook
-python-dotenv
