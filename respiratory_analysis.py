@@ -430,13 +430,13 @@ def execute_respiratory_analysis(
     name="predict_respiratory_rate",
     bind=True,
     max_retries=0,
+    queue="respiration",
 )
 def predict_respiratory_rate(
     self,
     video_url: str,
     submission_id: str,
 ):
-
     logger.info(
         "Respiratory task started: id=%s",
         submission_id,
