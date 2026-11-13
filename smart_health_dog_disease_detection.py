@@ -1,5 +1,5 @@
 from fastai.vision.all import *
-from celery import Celery
+from celery_app import app
 from urine_analysis import check_urine
 import smart_health_dog_config
 import requests
@@ -108,9 +108,6 @@ CAT_KFOLD_MODELS_HASHES: dict[str, str | None] = {
 logging.info(f"Loaded {len(DOG_MODELS)} dog models: {list(DOG_MODELS.keys())}")
 logging.info(f"Loaded {len(CAT_SINGLE_MODELS)} cat single models: {list(CAT_SINGLE_MODELS.keys())}")
 logging.info(f"Loaded {sum(len(v) for v in CAT_KFOLD_MODELS.values())} cat kfold models: {list(CAT_KFOLD_MODELS.keys())}")
-
-app = Celery("smart_health_dog_disease_detector")
-app.config_from_object(smart_health_dog_config)
 
 
 # ============================================================================

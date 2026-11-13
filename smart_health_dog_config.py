@@ -40,7 +40,7 @@ broker_url = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0'
 result_backend = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0'
 
 # A list of modules to import when the Celery worker starts
-imports = ('smart_health_dog_disease_detection',)
+imports = ('smart_health_dog_disease_detection', "respiratory_analysis",)
 
 # Task serialization (optional, but a good practice)
 task_serializer = 'json'

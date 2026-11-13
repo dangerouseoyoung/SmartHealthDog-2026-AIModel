@@ -1,4 +1,3 @@
-
 # respiratory_analysis.py
 
 import logging
@@ -11,7 +10,7 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-from smart_health_dog_disease_detection import app
+from celery_app import app
 
 from respiratory_pipeline import (
     run_respiratory_pipeline,
