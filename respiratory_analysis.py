@@ -3,6 +3,7 @@
 import logging
 import os
 import tempfile
+import time
 
 from pathlib import Path
 from urllib.parse import urlparse
@@ -42,7 +43,7 @@ BACKEND_RESPIRATION_ENDPOINT = os.getenv(
 )
 
 BACKEND_STATUS_ENDPOINT = os.getenv(
-    "AI_MODEL_SERVICE_STATUS_UPDATE_ENDPOINT"
+    "AI_MODEL_SERVICE_RESPIRATION_STATUS_UPDATE_ENDPOINT"
 )
 
 
@@ -68,7 +69,7 @@ RESPIRATION_VIDEO_TIMEOUT_CONNECT = int(
 )
 
 RESPIRATION_VIDEO_TIMEOUT = int(
-    os.getenv("RESPIRATION_VIDEO_TIMEOUT", "120")
+    os.getenv("RESPIRATION_VIDEO_TIMEOUT", "180")
 )
 
 RESPIRATION_MAX_VIDEO_SIZE_MB = int(
@@ -84,6 +85,7 @@ BACKEND_REQUEST_TIMEOUT = (
     int(os.getenv("BACKEND_READ_TIMEOUT", "30")),
 )
 
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL")
 
 # --------------------------------------------------
 # Environment Validation
@@ -161,7 +163,7 @@ def download_video(
     video_url: str,
     destination: Path,
 ) -> Path:
-    """영상을 메모리에 적재하지 않고 파일로 스트리밍 다운로드한다."""
+    """S3 영상을 스트리밍 방식으로 다운로드한다."""
 
     parsed_url = urlparse(video_url)
 
@@ -169,61 +171,80 @@ def download_video(
         raise ValueError("Invalid video URL")
 
     max_bytes = RESPIRATION_MAX_VIDEO_SIZE_MB * 1024 * 1024
-    downloaded_bytes = 0
+    max_retries = 3
+    chunk_size = 1024 * 1024
 
-    try:
-        with requests.get(
-            video_url,
-            stream=True,
-            timeout=(
-                RESPIRATION_VIDEO_TIMEOUT_CONNECT,
-                RESPIRATION_VIDEO_TIMEOUT,
-            ),
-        ) as response:
+    for attempt in range(max_retries):
+        downloaded_bytes = 0
 
-            response.raise_for_status()
+        try:
+            with requests.get(
+                video_url,
+                stream=True,
+                timeout=(
+                    RESPIRATION_VIDEO_TIMEOUT_CONNECT,
+                    RESPIRATION_VIDEO_TIMEOUT,
+                ),
+            ) as response:
 
-            content_length = response.headers.get("Content-Length")
+                response.raise_for_status()
 
-            if content_length:
-                try:
+                content_length = response.headers.get("Content-Length")
+
+                if content_length:
                     if int(content_length) > max_bytes:
                         raise ValueError(
                             "Video exceeds maximum file size"
                         )
-                except ValueError as exc:
-                    if str(exc) == "Video exceeds maximum file size":
-                        raise
 
-            with destination.open("wb") as file:
-                for chunk in response.iter_content(
-                    chunk_size=1024 * 1024
-                ):
-                    if not chunk:
-                        continue
+                with destination.open("wb") as file:
+                    for chunk in response.iter_content(
+                        chunk_size=chunk_size
+                    ):
+                        if not chunk:
+                            continue
 
-                    downloaded_bytes += len(chunk)
+                        downloaded_bytes += len(chunk)
 
-                    if downloaded_bytes > max_bytes:
-                        raise ValueError(
-                            "Video exceeds maximum file size"
-                        )
+                        if downloaded_bytes > max_bytes:
+                            raise ValueError(
+                                "Video exceeds maximum file size"
+                            )
 
-                    file.write(chunk)
+                        file.write(chunk)
 
-    except requests.Timeout as exc:
-        raise TimeoutError("Video download timed out") from exc
+            if downloaded_bytes == 0:
+                raise ValueError("Downloaded video is empty")
 
-    if downloaded_bytes == 0:
-        raise ValueError("Downloaded video is empty")
+            logger.info(
+                "Video downloaded: %.2f MB",
+                downloaded_bytes / (1024 * 1024),
+            )
 
-    logger.info(
-        "Video downloaded: %.2f MB",
-        downloaded_bytes / (1024 * 1024),
-    )
+            return destination
 
-    return destination
+        except requests.RequestException:
+            if destination.exists():
+                destination.unlink()
 
+            logger.warning(
+                "Video download failed: attempt=%d/%d",
+                attempt + 1,
+                max_retries,
+                exc_info=True,
+            )
+
+            if attempt == max_retries - 1:
+                raise
+
+            time.sleep(2 ** attempt)
+
+        except Exception:
+            if destination.exists():
+                destination.unlink()
+            raise
+
+    raise RuntimeError("Video download failed")
 
 # --------------------------------------------------
 # Backend API
