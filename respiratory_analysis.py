@@ -370,7 +370,100 @@ def execute_respiratory_analysis(
 
         # 1. Backend 인증
         token = get_auth_token()
+        
+        # 2. 임시 디렉터리 생성
+        temp_dir = tempfile.mkdtemp(
+            prefix="respiration_"
+        )
 
+        temp_path = Path(temp_dir)
+        video_path = temp_path / "input_video.mp4"
+
+        try:
+            # 3. 영상 다운로드
+            download_video(
+                video_url=video_url,
+                destination=video_path,
+            )
+
+            # 4. AI 분석
+            result = run_respiratory_pipeline(
+                video_path=video_path,
+                work_dir=temp_path / "analysis",
+                model_path=RESPIRATION_MODEL_PATH,
+                device=RESPIRATION_DEVICE,
+                stage_timeout=RESPIRATION_STAGE_TIMEOUT,
+            )
+
+            respiratory_rate = result["respiratory_rate"]
+
+            # 5. 결과 PATCH
+            submit_respiratory_result(
+                submission_id=submission_id,
+                respiratory_rate=respiratory_rate,
+                token=token,
+            )
+
+            # 6. 완료 상태 업데이트
+            submit_status_update(
+                submission_id=submission_id,
+                status="COMPLETED",
+                token=token,
+            )
+
+            logger.info(
+                "Respiratory analysis completed. "
+                "Debug directory will be removed: %s",
+                temp_path,
+            )
+
+            # 분석 성공 시 임시 디렉터리 삭제
+            shutil.rmtree(
+                temp_path,
+                ignore_errors=True,
+            )
+
+            return {
+                "status": "success",
+                "respiratory_rate": respiratory_rate,
+            }
+
+        except Exception as exc:
+
+            # 분석 실패 시 임시 디렉터리 유지
+            logger.exception(
+                "Respiratory analysis failed: id=%s",
+                submission_id,
+            )
+
+            logger.error(
+                "Debug files preserved at: %s",
+                temp_path,
+            )
+
+            # 인증 성공 이후에만 상태 업데이트 가능
+            if token:
+                failure_reason = map_failure_reason(exc)
+
+                update_failure_status(
+                    submission_id=submission_id,
+                    token=token,
+                    failure_reason=failure_reason,
+                )
+
+                return {
+                    "status": "failed",
+                    "reason_code": failure_reason,
+                    "debug_directory": str(temp_path),
+                }
+
+            return {
+                "status": "failed",
+                "reason_code": "AUTHENTICATION_FAILED",
+                "debug_directory": str(temp_path),
+            }
+            
+        """
         # 2. 임시 디렉터리 생성
         with tempfile.TemporaryDirectory(
             prefix="respiration_"
@@ -414,6 +507,7 @@ def execute_respiratory_analysis(
                 "status": "success",
                 "respiratory_rate": respiratory_rate,
             }
+            """
 
     except Exception as exc:
 
