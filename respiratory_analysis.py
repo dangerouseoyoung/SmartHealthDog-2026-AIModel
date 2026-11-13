@@ -427,7 +427,7 @@ def execute_respiratory_analysis(
 # --------------------------------------------------
 
 @app.task(
-    name="predict_respiratory_rate",
+    name="smart_health_dog_disease_detection.predict_respiration_rate",
     bind=True,
     max_retries=0,
     queue="respiration",
