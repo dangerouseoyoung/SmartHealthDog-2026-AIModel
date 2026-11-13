@@ -65,47 +65,6 @@ def _run_command(
     logger.info("Completed stage: %s", stage_name)
 
 
-def _get_segmentation_output_flag() -> str:
-    """
-    Segmentation runner의 실제 argparse 옵션을 확인한다.
-
-    --output-dir 또는 --output 중 지원하는 옵션을 반환한다.
-    """
-
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                SEGMENTATION_MODULE,
-                "--help",
-            ],
-            cwd=str(RESPIRATION_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-
-    except subprocess.TimeoutExpired as exc:
-        raise RespiratoryPipelineError(
-            "Cannot inspect segmentation CLI arguments"
-        ) from exc
-
-    help_text = result.stdout + result.stderr
-
-    if "--output-dir" in help_text:
-        return "--output-dir"
-
-    if "--output" in help_text:
-        return "--output"
-
-    raise RespiratoryPipelineError(
-        "Segmentation runner does not expose "
-        "--output-dir or --output"
-    )
-
-
 def _validate_result(result_path: Path) -> int:
     """최종 분석 결과를 확인하고 BPM을 반환한다."""
 
@@ -223,8 +182,6 @@ def run_respiratory_pipeline(
     # 1. YOLO Segmentation
     # ----------------------------------------------
 
-    output_flag = _get_segmentation_output_flag()
-
     segmentation_command = [
         python,
         "-m",
@@ -232,7 +189,7 @@ def run_respiratory_pipeline(
         "--video", str(video_path),
         "--model", str(model_path),
         "--device", str(device),
-        output_flag, str(segmentation_dir),
+        "--output", str(segmentation_dir),
     ]
 
     _run_command(
