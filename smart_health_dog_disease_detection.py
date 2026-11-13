@@ -47,7 +47,7 @@ DOG_MODELS_NAMES = {
     "./dog_models/dog_conjunctivitis.pkl":           "Conjunctivitis",
     "./dog_models/dog_entropion.pkl":               "Entropion",
     "./dog_models/dog_eyelid_tumor.pkl":            "Eyelid Tumor",
-    "./dog_models/dog_incontinence.pkl":             "Incontinence",
+    "./dog_models/dog_epiphora.pkl":                "Epiphora",
     "./dog_models/dog_non_ulcerative_keratitis.pkl": "Non-ulcerative Keratitis",
     "./dog_models/dog_nuclear_sclerosis.pkl":       "Nuclear Sclerosis",
     "./dog_models/dog_pigmentary_keratitis.pkl":    "Pigmentary Keratitis",
@@ -57,7 +57,7 @@ DOG_MODELS_NAMES = {
 # 고양이: 단일 모델 3종 (B4, FocalLoss)
 CAT_SINGLE_MODELS_NAMES = {
     "./cat_models/cat_conjunctivitis.pkl":  "Conjunctivitis",
-    "./cat_models/cat_corneal_dystrophy.pkl": "Corneal Dystrophy",
+    "./cat_models/cat_corneal_scapula.pkl": "Corneal_Scapula",
     "./cat_models/cat_corneal_ulcer.pkl":   "Corneal Ulcer",
 }
 
