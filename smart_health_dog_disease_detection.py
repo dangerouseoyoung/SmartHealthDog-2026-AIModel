@@ -47,7 +47,7 @@ DOG_MODELS_NAMES = {
     "./dog_models/dog_conjunctivitis.pkl":           "Conjunctivitis",
     "./dog_models/dog_entropion.pkl":               "Entropion",
     "./dog_models/dog_eyelid_tumor.pkl":            "Eyelid Tumor",
-    "./dog_models/dog_epiphora.pkl":                "Epiphora",
+    "./dog_models/dog_incontinence.pkl":             "Incontinence",
     "./dog_models/dog_non_ulcerative_keratitis.pkl": "Non-ulcerative Keratitis",
     "./dog_models/dog_nuclear_sclerosis.pkl":       "Nuclear Sclerosis",
     "./dog_models/dog_pigmentary_keratitis.pkl":    "Pigmentary Keratitis",
