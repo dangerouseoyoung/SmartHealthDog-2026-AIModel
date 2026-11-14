@@ -8,6 +8,10 @@ from celery_app import app
 from google_vision_ocr import extract_document
 from ocr.health_check_parser import HealthCheckParser
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,29 +104,123 @@ def send_certificate_result(submission_id, token, result):
     return response.status_code
 
 
+def send_ocr_failure_status(
+    submission_id: str,
+    token: str,
+    failure_reason: str
+):
+    """OCR 실패 상태를 Backend에 전송"""
+
+    endpoint = os.getenv(
+        "AI_MODEL_SERVICE_CERTIFICATE_STATUS_ENDPOINT"
+    )
+
+    if not endpoint:
+        raise RuntimeError(
+            "Certificate status endpoint is not configured"
+        )
+
+    url = endpoint.format(id=submission_id)
+
+    payload = {
+        "status": "FAILED",
+        "failureReason": failure_reason
+    }
+
+    response = requests.patch(
+        url,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        },
+        timeout=30
+    )
+
+    response.raise_for_status()
+    return response.status_code
+
+
 @app.task(name="predict_certificate_ocr")
 def predict_certificate_ocr(image_url: str, submission_id: str):
-    """Celery OCR 작업"""
+    """Celery OCR 작업 및 실패 상태 처리"""
 
-    # 1. 백엔드 JWT 인증
     token = get_ocr_auth_token()
 
     if not token:
+        logger.error("OCR backend authentication failed")
         raise RuntimeError("Backend authentication failed")
 
-    # 2. 이미지 다운로드
-    response = requests.get(image_url, timeout=30)
-    response.raise_for_status()
+    try:
+        # 1. 이미지 다운로드
+        response = requests.get(
+            image_url,
+            timeout=(10, 30)
+        )
+        response.raise_for_status()
 
-    # 3. OCR 실행 및 필드별 데이터 추출
-    result = process_certificate(response.content)
+        # 2. OCR 및 필드 추출
+        result = process_certificate(response.content)
 
-    # 4. 백엔드로 결과 전달
-    send_certificate_result(
-        submission_id=submission_id,
-        token=token,
-        result=result
+        # 3. OCR 실패 확인
+        if not result["success"]:
+            error_code = result["error"]
+
+            if error_code == "OCR_TIMEOUT":
+                reason = "TIMEOUT"
+            elif error_code in (
+                "INVALID_IMAGE",
+                "UNSUPPORTED_FORMAT",
+                "IMAGE_TOO_LARGE"
+            ):
+                reason = "INVALID_INPUT"
+            else:
+                reason = "INFERENCE_ERROR"
+
+            send_ocr_failure_status(
+                submission_id,
+                token,
+                reason
+            )
+
+            return {
+                "status": "FAILED",
+                "error": error_code
+            }
+
+        # 4. 정상 결과 전송
+        send_certificate_result(
+            submission_id=submission_id,
+            token=token,
+            result=result
+        )
+
+        return result
+
+    except requests.exceptions.Timeout:
+        reason = "TIMEOUT"
+
+    except requests.exceptions.RequestException:
+        reason = "INFERENCE_ERROR"
+
+    except Exception:
+        reason = "INFERENCE_ERROR"
+
+    # 5. 예외 발생 시 실패 상태 전달
+    logger.error(
+        "Certificate OCR failed: submission_id=%s, reason=%s",
+        submission_id,
+        reason
     )
 
-    return result
+    send_ocr_failure_status(
+        submission_id,
+        token,
+        reason
+    )
+
+    return {
+        "status": "FAILED",
+        "error": reason
+    }
 
