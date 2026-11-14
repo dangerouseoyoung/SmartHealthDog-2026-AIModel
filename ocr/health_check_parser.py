@@ -1,7 +1,7 @@
 import re
 from difflib import SequenceMatcher
 
-from health_check_fields import (
+from ocr.health_check_fields import (
     FIELD_ALIASES,
     MULTILINE_FIELDS,
     DATE_FIELDS
@@ -867,6 +867,15 @@ class HealthCheckParser:
                 ]
             )
 
+
+            # 문서 하단의 독립적인 날짜 블록 제외
+            if self.normalize_date(text) and re.fullmatch(
+                r"\s*20\d{2}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일\s*",
+                text
+            ):
+                continue
+
+
             detected_field, _ = (
                 self.detect_label(
                     text
@@ -1134,7 +1143,8 @@ class HealthCheckParser:
 
     def find_document_date(
         self,
-        blocks
+        blocks,
+        excluded_dates=None
     ):
 
         """
@@ -1237,11 +1247,25 @@ class HealthCheckParser:
         if not dates:
             return None
 
-        # 가장 아래쪽의 날짜 사용
-        dates.sort(
-            key=lambda item:
-            item[0]
-        )
+        
+        # 이미 다른 날짜 필드에서 사용한 날짜는
+        # 작성일 후보에서 제외한다.
+        excluded_dates = set(excluded_dates or [])
+
+        dates = [
+            (y, date)
+            for y, date in dates
+            if date not in excluded_dates
+        ]
+
+        if not dates:
+            return None
+
+        # 남은 날짜 중 가장 아래쪽 날짜 선택
+        dates.sort(key=lambda item: item[0])
+
+        return dates[-1][1]
+
 
         return dates[-1][1]
 
@@ -1374,20 +1398,24 @@ class HealthCheckParser:
         # 작성일 라벨이 없는 문서
         # -----------------------------------------------------
 
-        if (
-            result.get(
-                "document_date"
-            )
-            is None
-        ):
+        
+        if result.get("document_date") is None:
 
-            result[
-                "document_date"
-            ] = (
+            # 이미 추출된 날짜 필드의 값 수집
+            excluded_dates = {
+                result[field]
+                for field in DATE_FIELDS
+                if field != "document_date"
+                and result.get(field) is not None
+            }
+
+            result["document_date"] = (
                 self.find_document_date(
-                    original_blocks
+                    original_blocks,
+                    excluded_dates=excluded_dates
                 )
             )
+
 
         # -----------------------------------------------------
         # 동물명 안에 등록번호가 섞여 있는 경우
