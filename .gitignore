@@ -21,3 +21,8 @@ respiration/data/
 respiration/outputs
 respiration/weights/
 mlflow.db
+certificate.png
+test_certificate_ocr.py
+
+# Local OCR test images
+certificate.png

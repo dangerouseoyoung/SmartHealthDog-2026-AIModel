@@ -88,3 +88,95 @@ def extract_text(image_bytes: bytes, *, client: Any = None, timeout: int = 60) -
         return _result(error="OCR_RATE_LIMIT")
     except Exception:
         return _result(error="OCR_SERVICE_ERROR")
+
+
+def extract_document(image_bytes: bytes, *, client: Any = None, timeout: int = 60) -> dict[str, Any]:
+    """Return OCR text and position-aware paragraph blocks."""
+    error = validate_image(image_bytes)
+    if error:
+        return {"success": False, "rawText": None, "blocks": [], "error": error}
+
+    try:
+        ocr_client = client if client is not None else vision.ImageAnnotatorClient()
+        response = ocr_client.document_text_detection(
+            image=vision.Image(content=image_bytes),
+            image_context=vision.ImageContext(language_hints=["ko", "en"]),
+            timeout=timeout,
+        )
+
+        if response.error.message:
+            code = getattr(response.error, "code", 0)
+            error = {
+                7: "OCR_AUTH_ERROR",
+                16: "OCR_AUTH_ERROR",
+                4: "OCR_TIMEOUT",
+                8: "OCR_RATE_LIMIT",
+            }.get(code, "OCR_SERVICE_ERROR")
+            return {"success": False, "rawText": None, "blocks": [], "error": error}
+
+        annotation = response.full_text_annotation
+        raw_text = (annotation.text or "").strip()
+
+        if not raw_text:
+            return {"success": False, "rawText": None, "blocks": [], "error": "NO_TEXT_DETECTED"}
+
+        blocks = []
+
+        for page in annotation.pages:
+            for vision_block in page.blocks:
+                for paragraph in vision_block.paragraphs:
+                    words = []
+                    confidences = []
+
+                    for word in paragraph.words:
+                        word_text = "".join(
+                            symbol.text for symbol in word.symbols
+                        )
+                        words.append(word_text)
+                        confidences.append(word.confidence)
+
+                    text = " ".join(words).strip()
+                    if not text:
+                        continue
+
+                    vertices = paragraph.bounding_box.vertices
+                    xs = [v.x for v in vertices]
+                    ys = [v.y for v in vertices]
+
+                    x1, x2 = min(xs), max(xs)
+                    y1, y2 = min(ys), max(ys)
+
+                    blocks.append({
+                        "text": text,
+                        "confidence": (
+                            sum(confidences) / len(confidences)
+                            if confidences else 0.0
+                        ),
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "center_x": (x1 + x2) // 2,
+                        "center_y": (y1 + y2) // 2,
+                        "bbox": [[v.x, v.y] for v in vertices],
+                    })
+
+        blocks.sort(key=lambda b: (b["center_y"], b["center_x"]))
+
+        return {
+            "success": True,
+            "rawText": raw_text,
+            "blocks": blocks,
+            "error": None,
+        }
+
+    except (google_errors.Unauthenticated, google_errors.PermissionDenied):
+        error = "OCR_AUTH_ERROR"
+    except (google_errors.DeadlineExceeded, TimeoutError):
+        error = "OCR_TIMEOUT"
+    except (google_errors.ResourceExhausted, google_errors.TooManyRequests):
+        error = "OCR_RATE_LIMIT"
+    except Exception:
+        error = "OCR_SERVICE_ERROR"
+
+    return {"success": False, "rawText": None, "blocks": [], "error": error}
