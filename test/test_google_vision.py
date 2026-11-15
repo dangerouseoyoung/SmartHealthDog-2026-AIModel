@@ -1,10 +1,10 @@
-"""Manual local smoke test: python test_google_vision.py path/to/image.png"""
+"""Manual local smoke test (실제 Vision 호출 1회 과금/카운트): python -m test.test_google_vision path/to/image.png"""
 import argparse
 import json
 import time
 from pathlib import Path
 
-from google_vision_ocr import extract_text
+from ocr.google_vision_ocr import extract_text
 
 
 def main() -> int:

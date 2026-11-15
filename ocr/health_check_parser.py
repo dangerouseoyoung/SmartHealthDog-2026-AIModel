@@ -1,7 +1,8 @@
 import re
+from datetime import date
 from difflib import SequenceMatcher
 
-from health_check_fields import (
+from ocr.health_check_fields import (
     FIELD_ALIASES,
     MULTILINE_FIELDS,
     DATE_FIELDS
@@ -232,11 +233,7 @@ class HealthCheckParser:
     ):
 
         # alias 내부의 공백 차이 허용
-        compact_alias = re.sub(
-            r"\s+",
-            r"\\s*",
-            re.escape(alias)
-        )
+        compact_alias = r"\s*".join(re.escape(part) for part in alias.split())
 
         match = re.search(
             compact_alias,
@@ -278,6 +275,11 @@ class HealthCheckParser:
         normalized_alias = (
             self.normalize(alias)
         )
+
+        # "동물 명"처럼 OCR이 라벨 안에 공백을 넣은 경우에는
+        # 라벨의 마지막 단어("명")를 값으로 착각하면 안 된다.
+        if normalized_text == normalized_alias:
+            return None
 
         if (
             normalized_text.startswith(
@@ -331,6 +333,17 @@ class HealthCheckParser:
             ):
 
                 b = blocks[j]
+
+                # 완성된 라벨과 다른 행의 텍스트를 붙이면
+                # "특징 별명" 같은 가짜 inline 값이 만들어진다.
+                if self.detect_label(a["text"])[0] is not None:
+                    continue
+                if self.detect_label(b["text"])[0] is not None:
+                    continue
+
+                # 다른 표 행 간 결합 금지. 분리된 글자 라벨만 결합한다.
+                if not self.same_row(a, b):
+                    continue
 
                 vertical_distance = abs(
                     a["center_y"]
@@ -474,6 +487,17 @@ class HealthCheckParser:
 
         candidates = []
 
+        # 2열 표에서 오른쪽의 *다른 필드 라벨*을 넘어서
+        # 값을 가져오지 않도록 칸 경계를 찾는다.
+        other_labels_to_right = [
+            b["x1"] for b in blocks
+            if b is not label_block
+            and self.is_label(b)
+            and self.same_row(label_block, b)
+            and b["center_x"] > label_block["center_x"]
+        ]
+        right_boundary = min(other_labels_to_right) if other_labels_to_right else float("inf")
+
         for block in blocks:
 
             if block is label_block:
@@ -496,6 +520,9 @@ class HealthCheckParser:
                 <=
                 label_block["center_x"]
             ):
+                continue
+
+            if block["center_x"] >= right_boundary:
                 continue
 
             distance = max(
@@ -867,6 +894,15 @@ class HealthCheckParser:
                 ]
             )
 
+
+            # 문서 하단의 독립적인 날짜 블록 제외
+            if self.normalize_date(text) and re.fullmatch(
+                r"\s*20\d{2}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일\s*",
+                text
+            ):
+                continue
+
+
             detected_field, _ = (
                 self.detect_label(
                     text
@@ -884,6 +920,13 @@ class HealthCheckParser:
                     text
                 )
             ):
+                continue
+
+            # 여러 줄 필드에서도 왼쪽의 다른 라벨이나
+            # 다른 표 행의 날짜를 값으로 가져오지 않게 한다.
+            if candidate["center_x"] <= block["center_x"] + 8:
+                continue
+            if field == "disease_name" and self.normalize_date(text):
                 continue
 
             if text not in values:
@@ -997,11 +1040,10 @@ class HealthCheckParser:
                 match.groups()
             )
 
-            return (
-                f"{int(year):04d}-"
-                f"{int(month):02d}-"
-                f"{int(day):02d}"
-            )
+            try:
+                return date(int(year), int(month), int(day)).isoformat()
+            except ValueError:
+                return None
 
         # -----------------------------------------------------
         # 2025.10.31
@@ -1024,11 +1066,19 @@ class HealthCheckParser:
                 match.groups()
             )
 
-            return (
-                f"{int(year):04d}-"
-                f"{int(month):02d}-"
-                f"{int(day):02d}"
-            )
+            try:
+                return date(int(year), int(month), int(day)).isoformat()
+            except ValueError:
+                return None
+
+        # Google Vision이 구분자 없이 읽는 YYYYMMDD (예: 20201028)
+        match = re.search(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)", text)
+        if match:
+            year, month, day = map(int, match.groups())
+            try:
+                return date(year, month, day).isoformat()
+            except ValueError:
+                return None
 
         return None
 
@@ -1046,6 +1096,23 @@ class HealthCheckParser:
         block = (
             label["block"]
         )
+
+        # 입원/퇴원일은 범위일 수 있으므로 단일 날짜로 잘라내지 않는다.
+        if label["field"] == "hospitalization_discharge_date":
+            right = self.values_on_right(block, blocks)
+            below = self.values_below(label, blocks, labels)
+            candidate = " ".join([block["text"]] + [b["text"] for b in right] + [b["text"] for b in below[:5]])
+            tokens = re.findall(
+                r"20\d{2}\s*(?:년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2})",
+                candidate,
+            )
+            dates = []
+            for token in tokens:
+                normalized = self.normalize_date(token)
+                if normalized and normalized not in dates:
+                    dates.append(normalized)
+            if dates:
+                return " ~ ".join(dates[:2])
 
         # -----------------------------------------------------
         # 1. 같은 OCR 블록
@@ -1134,7 +1201,8 @@ class HealthCheckParser:
 
     def find_document_date(
         self,
-        blocks
+        blocks,
+        excluded_dates=None
     ):
 
         """
@@ -1237,11 +1305,22 @@ class HealthCheckParser:
         if not dates:
             return None
 
-        # 가장 아래쪽의 날짜 사용
-        dates.sort(
-            key=lambda item:
-            item[0]
-        )
+        
+        # 이미 다른 날짜 필드에서 사용한 날짜는
+        # 작성일 후보에서 제외한다.
+        excluded_dates = set(excluded_dates or [])
+
+        dates = [
+            (y, date)
+            for y, date in dates
+            if date not in excluded_dates
+        ]
+
+        if not dates:
+            return None
+
+        # 남은 날짜 중 가장 아래쪽 날짜 선택
+        dates.sort(key=lambda item: item[0])
 
         return dates[-1][1]
 
@@ -1272,6 +1351,116 @@ class HealthCheckParser:
         )
 
     # =========================================================
+    # 진단서 표 OCR 오인식 복원 (문서 내용 자체를 만들지 않음)
+    # =========================================================
+
+    def recover_template_labels(self, original_blocks):
+        """일부 OCR 오타를 *주변 라벨과 표 위치가 확실할 때만* 복원.
+
+        원본 OCR 데이터는 수정하지 않는다. 임의의 진단명/날짜는 만들지 않는다.
+        """
+        blocks = [dict(b) for b in original_blocks]
+        all_fields = [(self.detect_label(b["text"])[0], b) for b in blocks]
+
+        def first_y(field):
+            matches = [b["center_y"] for f, b in all_fields if f == field]
+            return min(matches) if matches else None
+
+        features_y = first_y("features")
+        diag_y = first_y("diagnosis_date")
+        if features_y is None or diag_y is None:
+            return blocks
+
+        # 이 진단서처럼 특징 → 병명 → 발병일 → 진단일 순서가 확인될 때만
+        # "별명"(병명 오인식)을 보정한다.
+        disease_blocks = [b for f, b in all_fields if f == "disease_name"]
+        if not disease_blocks:
+            malformed_onset = any(
+                self.normalize(b["text"]).startswith("별명(")
+                for b in blocks
+            )
+            has_date_row = any(
+                self.normalize(b["text"]) == "연월일"
+                and features_y < b["center_y"] < diag_y
+                for b in blocks
+            )
+            if malformed_onset and has_date_row:
+                for b in blocks:
+                    if (
+                        self.normalize(b["text"]) == "별명"
+                        and features_y + 10 < b["center_y"] < diag_y - 12
+                    ):
+                        b["text"] = "병명"
+                        break
+
+        # "발병(발견) 연월일"이 두 블록으로 손상되어 인식된 경우.
+        has_onset = any(self.detect_label(b["text"])[0] == "onset_date" for b in blocks)
+        if not has_onset:
+            for b in blocks:
+                if not (
+                    self.normalize(b["text"]) == "연월일"
+                    and features_y < b["center_y"] < diag_y
+                ):
+                    continue
+                near_malformed = any(
+                    self.normalize(x["text"]).startswith("별명(")
+                    and abs(x["center_y"] - b["center_y"]) <= 22
+                    for x in blocks if x is not b
+                )
+                near_date = any(
+                    self.normalize_date(x["text"])
+                    and abs(x["center_y"] - b["center_y"]) <= 18
+                    and x["center_x"] > b["center_x"]
+                    for x in blocks if x is not b
+                )
+                if near_malformed and near_date:
+                    b["text"] = "발병 연월일"
+                    break
+
+        # 진단서 하단 "그 밖의 사항"을 "그림 사항"으로 잘못 읽는 경우.
+        if not any(self.detect_label(b["text"])[0] == "notes" for b in blocks):
+            for b in blocks:
+                if (
+                    self.normalize(b["text"]) == "그림사항"
+                    and b["center_y"] > diag_y + 30
+                ):
+                    b["text"] = "그 밖의 사항"
+                    break
+
+        # 예후 소견은 긴 내용과 왼쪽 라벨이 한 OCR 블록에 합쳐지기도 함.
+        # 예후 라벨이 없어도 병원 소견 본문은 원문 블록 그대로 보존한다.
+        if not any(self.detect_label(b["text"])[0] == "prognosis" for b in blocks):
+            note_ys = [
+                b["center_y"] for b in blocks
+                if self.detect_label(b["text"])[0] == "notes"
+                and b["center_y"] > diag_y
+            ]
+            if note_ys:
+                notes_y = min(note_ys)
+                candidates = [
+                    b for b in blocks
+                    if diag_y + 12 < b["center_y"] < notes_y - 12
+                    and len(b["text"]) >= 24
+                    and ("검사" in b["text"] or "의심" in b["text"])
+                ]
+                if candidates:
+                    main = min(candidates, key=lambda b: b["center_y"])
+                    synthetic = {
+                        "text": "예후 소견",
+                        "confidence": 0.0,
+                        "x1": 10, "x2": 65,
+                        "y1": main["center_y"] - 8,
+                        "y2": main["center_y"] + 8,
+                        "center_x": 37,
+                        "center_y": main["center_y"],
+                        "bbox": [],
+                    }
+                    blocks.append(synthetic)
+
+        blocks.sort(key=lambda b: (b["center_y"], b["center_x"]))
+        return blocks
+
+    # =========================================================
     # 전체 Parsing
     # =========================================================
 
@@ -1288,7 +1477,7 @@ class HealthCheckParser:
 
         blocks = (
             self.merge_split_labels(
-                original_blocks
+                self.recover_template_labels(original_blocks)
             )
         )
 
@@ -1374,20 +1563,24 @@ class HealthCheckParser:
         # 작성일 라벨이 없는 문서
         # -----------------------------------------------------
 
-        if (
-            result.get(
-                "document_date"
-            )
-            is None
-        ):
+        
+        if result.get("document_date") is None:
 
-            result[
-                "document_date"
-            ] = (
+            # 이미 추출된 날짜 필드의 값 수집
+            excluded_dates = {
+                result[field]
+                for field in DATE_FIELDS
+                if field != "document_date"
+                and result.get(field) is not None
+            }
+
+            result["document_date"] = (
                 self.find_document_date(
-                    original_blocks
+                    original_blocks,
+                    excluded_dates=excluded_dates
                 )
             )
+
 
         # -----------------------------------------------------
         # 동물명 안에 등록번호가 섞여 있는 경우

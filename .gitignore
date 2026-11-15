@@ -21,3 +21,10 @@ respiration/data/
 respiration/outputs
 respiration/weights/
 mlflow.db
+ocr/docs/
+ocr/examples/
+
+# Google Vision 서비스 계정 키
+ocr/*.json
+!ocr/examples/*.json
+*service-account*.json

@@ -1,11 +1,15 @@
-"""Offline tests: python -m unittest test_google_vision_unit -v"""
+"""Offline tests (프로젝트 루트): python -m pytest -q test/test_google_vision_unit.py"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import io
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 from PIL import Image
 from google.api_core import exceptions as errors
-from google_vision_ocr import extract_text, validate_image
+from ocr.google_vision_ocr import extract_text, validate_image
 
 
 def png_bytes():
@@ -22,6 +26,13 @@ def response(text="hello", message="", code=0):
 
 
 class OCRTests(unittest.TestCase):
+    def setUp(self):
+        # 사용량 카운터(Redis)를 건드리지 않도록 예약 함수를 대체한다.
+        from unittest.mock import patch
+        patcher = patch("ocr.google_vision_ocr.reserve_document_text_unit")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_empty(self):
         self.assertEqual(extract_text(b"")["error"], "INVALID_IMAGE")
 
