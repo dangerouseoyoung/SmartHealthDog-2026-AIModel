@@ -1,8 +1,12 @@
-"""Manual local smoke test (실제 Vision 호출 1회 과금/카운트): python -m test.test_google_vision path/to/image.png"""
+"""Manual local smoke test (실제 Vision 호출 1회 과금/카운트): python test/test_google_vision.py path/to/image.png"""
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
+
+# 루트의 test.py 와 이름이 겹쳐 `python -m test.…` 은 불가 → 루트를 직접 경로에 추가
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ocr.google_vision_ocr import extract_text
 
