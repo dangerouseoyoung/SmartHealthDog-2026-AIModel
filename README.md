@@ -19,7 +19,7 @@ AI 기반 반려동물 건강 분석 워커입니다.
 
 | 큐 | 워커 설정 (`--config`) | 기능 | 태스크 이름 | 인자 |
 |---|---|---|---|---|
-| `detection` | `smart_health_dog_detection_config` | 개 안구 질환 | `smart_health_dog_disease_detection.predict_dog_disease` | `(image_url, submission_id)` |
+| `celery` | `smart_health_dog_detection_config` | 개 안구 질환 | `smart_health_dog_disease_detection.predict_dog_disease` | `(image_url, submission_id)` |
 | | | 고양이 안구 질환 | `smart_health_dog_disease_detection.predict_cat_disease` | `(image_url, submission_id)` |
 | | | 소변 스트립 분석 | `smart_health_dog_disease_detection.predict_urine_analysis` | `(image_url, submission_id)` |
 | `respiration` | `smart_health_dog_respiration_config` | 호흡수 측정 (영상) | `smart_health_dog_disease_detection.predict_respiration_rate` | `(video_url, submission_id)` |
@@ -27,7 +27,7 @@ AI 기반 반려동물 건강 분석 워커입니다.
 
 > 태스크 이름은 백엔드 `CeleryTaskSender`가 보내는 이름과 정확히 같아야 합니다. 함수 이름이나 모듈 위치를 바꿀 때 주의하세요.
 
-### 1.1 `detection` 큐 — 안구 질환 / 소변 분석
+### 1.1 `celery` 큐 — 안구 질환 / 소변 분석
 
 코드: [smart_health_dog_disease_detection.py](smart_health_dog_disease_detection.py), [urine_analysis.py](urine_analysis.py)
 
@@ -86,7 +86,7 @@ AI 기반 반려동물 건강 분석 워커입니다.
   { "success": true, "rawText": "...", "confidence": 0.91, "fields": { "...17개 camelCase..." }, "error": null }
   ```
 - 실패도 같은 엔드포인트로 `{"success": false, "fields": null, "error": "<코드>"}` 전송.
-  상태 전환(COMPLETED/FAILED/재시도)은 백엔드가 `confidence`(최소 0.75)와 `error` 코드로 판단
+  상태 전환(COMPLETED/FAILED/재시도)은 백엔드가 `confidence`(최소 0.70)와 `error` 코드로 판단
 - `rawText`는 민감정보이므로 로그·Celery 결과 백엔드에 남기지 않음
 
 ---
@@ -97,7 +97,7 @@ AI 기반 반려동물 건강 분석 워커입니다.
 SmartHealthDog-2026-AIModel/
 ├── celery_app.py                          # 공용 Celery 앱
 ├── smart_health_dog_config.py             # 공용 설정 (.env → broker/backend, 인증)
-├── smart_health_dog_detection_config.py   # detection 큐 워커 설정
+├── smart_health_dog_detection_config.py   # celery 큐(안구/소변) 워커 설정
 ├── smart_health_dog_respiration_config.py # respiration 큐 워커 설정
 ├── smart_health_dog_ocr_config.py         # ocr 큐 워커 설정
 │
@@ -154,7 +154,7 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 
-# detection 큐 (안구/소변)
+# celery 큐 (안구/소변)
 AI_MODEL_SERVICE_EYE_UPDATE_ENDPOINT=http://BACKEND_HOST/api/submissions/{id}/eye
 AI_MODEL_SERVICE_URINE_UPDATE_ENDPOINT=
 AI_MODEL_SERVICE_STATUS_UPDATE_ENDPOINT=http://BACKEND_HOST/api/submissions/{id}/status
@@ -184,8 +184,8 @@ OCR_MAX_REQUESTS_32D=800         # Vision 호출 상한 (1~800)
 모델·가중치 파일은 Git에 포함되지 않습니다.
 
 ```
-dog_models/*.pkl                       # detection 큐
-cat_models/*.pkl                       # detection 큐 (KFold: *_fold1~5.pkl)
+dog_models/*.pkl                       # celery 큐
+cat_models/*.pkl                       # celery 큐 (KFold: *_fold1~5.pkl)
 respiration/weights/yolo11s-seg.pt     # respiration 큐
 ocr/<서비스 계정 키>.json               # ocr 큐 (Google Vision, 절대 커밋 금지)
 ```
@@ -207,7 +207,7 @@ redis-cli ping    # → PONG
 
 ```bash
 # 안구 질환 / 소변 분석
-celery -A celery_app --config smart_health_dog_detection_config worker -Q detection -c 1 -l info
+celery -A celery_app --config smart_health_dog_detection_config worker -Q celery -c 1 -l info
 
 # 호흡수 측정
 celery -A celery_app --config smart_health_dog_respiration_config worker -Q respiration -c 1 -l info
@@ -238,7 +238,7 @@ python test.py
 - 모델 경로 (`./dog_models`, `./cat_models`) 변경 금지
 - `.env` 없으면 인증 실패
 - Redis 실행 안 하면 Celery 동작 안 함
-- 각 워커는 자기 큐만 소비 (`detection` / `respiration` / `ocr`)
+- 각 워커는 자기 큐만 소비 (`celery` / `respiration` / `ocr`)
 - Google 서비스 계정 키와 `.env`는 절대 커밋·공유 금지
 
 ---
@@ -249,7 +249,7 @@ python test.py
 |------|------|
 | 로컬 | Windows + CPU |
 | 서버 | CHEETAH + GPU |
-| 큐 | Redis (`detection`, `respiration`, `ocr`) |
+| 큐 | Redis (`celery`, `respiration`, `ocr`) |
 | 처리 | Celery |
 
 ---
